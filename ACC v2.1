@@ -753,7 +753,7 @@ AutoFarmTab:CreateSection("Pack Automation")
 local MutationTab = Window:CreateTab("Mutation Filters", 4483362458)
 MutationTab:CreateSection("Allowed Mutations")
 
--- NEW: More Filters Tab
+-- More Filters Tab
 local MoreFiltersTab = Window:CreateTab("More Filters", 4483362458)
 
 -- Services
@@ -768,35 +768,41 @@ local CardRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Card"
 local autoFarmPacksEnabled = false
 local selectedPacks = {}
 
-local mutationFilters = {
-    Gold = false,
-    Emerald = false,
-    Void = false,
-    Diamond = false,
-    Rainbow = false
+-- ORDERED LIST (IMPORTANT CHANGE)
+local mutationOrder = {
+    "NoMutation",
+    "Gold",
+    "Emerald",
+    "Void",
+    "Diamond",
+    "Rainbow"
 }
 
--- NEW: Per-pack mutation filters
+-- Lookup table
+local mutationFilters = {}
+for _, name in ipairs(mutationOrder) do
+    mutationFilters[name] = false
+end
+
 local packMutationFilters = {}
 
 --========================================================
--- MUTATION FILTER TOGGLES (GLOBAL)
+-- GLOBAL MUTATION FILTER UI (ORDERED)
 --========================================================
-for mutation, _ in pairs(mutationFilters) do
+for _, mutation in ipairs(mutationOrder) do
     MutationTab:CreateToggle({
-        Name = mutation,
+        Name = (mutation == "NoMutation" and "No Mutation" or mutation),
         CurrentValue = false,
         Flag = "Mutation_" .. mutation,
         Callback = function(v)
             mutationFilters[mutation] = v
-            print("[MutationTab] " .. mutation .. " set to", v)
         end
     })
 end
 
--- Restore saved mutation flags
+-- Restore
 task.delay(1, function()
-    for mutation, _ in pairs(mutationFilters) do
+    for _, mutation in ipairs(mutationOrder) do
         local flag = Rayfield.Flags["Mutation_" .. mutation]
         if flag and flag.CurrentValue ~= nil then
             mutationFilters[mutation] = flag.CurrentValue
@@ -817,7 +823,7 @@ AutoFarmTab:CreateToggle({
 })
 
 --========================================================
--- PACK FILTERS + PER PACK MUTATION UI
+-- PACK + PER PACK FILTERS
 --========================================================
 local packsFolder =
     ReplicatedStorage:FindFirstChild("Assets")
@@ -828,13 +834,12 @@ if packsFolder then
         if pack:IsA("Model") then
             selectedPacks[pack.Name] = false
 
-            -- Initialize per-pack mutation table
             packMutationFilters[pack.Name] = {}
-            for mutation, _ in pairs(mutationFilters) do
+            for _, mutation in ipairs(mutationOrder) do
                 packMutationFilters[pack.Name][mutation] = false
             end
 
-            -- AUTO FARM TAB TOGGLE
+            -- Pack toggle
             AutoFarmTab:CreateToggle({
                 Name = pack.Name,
                 CurrentValue = false,
@@ -844,21 +849,19 @@ if packsFolder then
                 end
             })
 
-            --========================================================
-            -- NEW: MORE FILTERS TAB (PER PACK)
-            --========================================================
+            -- Section
             MoreFiltersTab:CreateSection(pack.Name .. " Pack Filters")
 
-            for mutation, _ in pairs(mutationFilters) do
+            -- ORDERED toggles per pack
+            for _, mutation in ipairs(mutationOrder) do
                 local flagName = "Pack_" .. pack.Name .. "_Mutation_" .. mutation
 
                 MoreFiltersTab:CreateToggle({
-                    Name = mutation,
+                    Name = (mutation == "NoMutation" and "No Mutation" or mutation),
                     CurrentValue = false,
                     Flag = flagName,
                     Callback = function(v)
                         packMutationFilters[pack.Name][mutation] = v
-                        print("[MoreFilters] " .. pack.Name .. " -> " .. mutation .. ":", v)
                     end
                 })
             end
@@ -866,7 +869,7 @@ if packsFolder then
     end
 end
 
--- Restore pack toggles
+-- Restore toggles
 task.delay(1, function()
     for packName, _ in pairs(selectedPacks) do
         local flag = Rayfield.Flags["Pack_" .. packName]
@@ -874,8 +877,7 @@ task.delay(1, function()
             selectedPacks[packName] = flag.CurrentValue
         end
 
-        -- Restore per-pack mutation toggles
-        for mutation, _ in pairs(mutationFilters) do
+        for _, mutation in ipairs(mutationOrder) do
             local flagName = "Pack_" .. packName .. "_Mutation_" .. mutation
             local mFlag = Rayfield.Flags[flagName]
 
@@ -887,12 +889,11 @@ task.delay(1, function()
 end)
 
 --========================================================
--- MUTATION CHECK FUNCTION (UPDATED WITH PER-PACK LOGIC)
+-- MUTATION CHECK
 --========================================================
 local function mutationPasses(packInstance)
     local packName = packInstance.Name
 
-    -- Check if this pack has ANY per-pack filters enabled
     local packFilters = packMutationFilters[packName]
     local usePackFilters = false
 
@@ -905,16 +906,8 @@ local function mutationPasses(packInstance)
         end
     end
 
-    local activeFilters = {}
+    local activeFilters = usePackFilters and packFilters or mutationFilters
 
-    if usePackFilters then
-        activeFilters = packFilters
-        print("[Mutation] Using PER-PACK filters for:", packName)
-    else
-        activeFilters = mutationFilters
-    end
-
-    -- Check if any filter is enabled
     local anyEnabled = false
     for _, enabled in pairs(activeFilters) do
         if enabled then
@@ -927,23 +920,33 @@ local function mutationPasses(packInstance)
         return true
     end
 
+    local foundMutation = false
+
     for _, descendant in ipairs(packInstance:GetDescendants()) do
         if descendant:IsA("Model") or descendant:IsA("Folder") or descendant:IsA("Part") then
             local name = descendant.Name:gsub("%s+", ""):lower()
 
-            for filterName, enabled in pairs(activeFilters) do
-                if enabled and name == filterName:lower() then
+            for _, mutation in ipairs(mutationOrder) do
+                if mutation ~= "NoMutation" and activeFilters[mutation] and name == mutation:lower() then
                     return true
+                end
+
+                if mutation ~= "NoMutation" and name == mutation:lower() then
+                    foundMutation = true
                 end
             end
         end
+    end
+
+    if activeFilters["NoMutation"] and not foundMutation then
+        return true
     end
 
     return false
 end
 
 --========================================================
--- GET LOCAL PLAYER PLOT
+-- GET PLAYER PLOT
 --========================================================
 local function getPlayerPlot()
     local plotsFolder = workspace:FindFirstChild("Plots")
